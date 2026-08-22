@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>3MF XL Tool Mapper</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260822-2">
+</head>
+<body>
+  <header><div><span class="tag">PRUSA XL · LOCAL</span><h1>3MF TOOL MAPPER</h1></div><div id="status" class="status">Čeka datoteku</div></header>
+  <main>
+    <section class="upload card">
+      <input id="file" type="file" accept=".3mf" hidden>
+      <button id="choose">ODABERI 3MF</button>
+      <div><strong id="filename">Nijedna datoteka nije odabrana</strong><small id="hash"></small></div>
+    </section>
+    <section class="workspace hidden" id="workspace">
+      <div class="preview-block"><h2>3D MODEL</h2><div class="viewer preview-frame card"><div id="canvas"></div><button id="fit" class="minor">FIT MODEL</button><div id="loading3d">Učitavanje 3D prikaza…</div></div></div>
+      <div class="preview-block"><h2>3MF PREVIEW</h2><div class="embedded-preview thumbnail-frame preview-frame card"><img id="thumbnail" alt="Ugrađeni 3MF preview"><span id="no-thumbnail">Nema ugrađenog previewa</span></div></div>
+      <aside>
+        <div class="card"><h2>FILAMENT / TOOL</h2><div id="tools"></div></div>
+        <div class="card diagnostic"><h2>DIJAGNOSTIKA</h2><pre id="diagnostic"></pre></div>
+        <div id="warning" class="warning hidden"><strong>Konflikt mapiranja</strong><span>Više originalnih alata mapirano je na isti XL Tool.</span><label><input id="confirm" type="checkbox"> Eksplicitno potvrđujem konflikt</label></div>
+        <button id="save" class="save">SPREMI NOVI 3MF</button>
+        <div id="message"></div>
+      </aside>
+    </section>
+  </main>
+  <script type="importmap">{"imports":{"three":"/static/vendor/three.module.js","three/addons/":"/static/vendor/"}}</script>
+  <script type="module" src="/static/app.js?v=20260822-3"></script>
+</body>
+</html>
