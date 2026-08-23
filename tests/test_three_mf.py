@@ -240,6 +240,34 @@ class ExportTests(unittest.TestCase):
         self.assertGreaterEqual(checks, 2)
         self.assertFalse(out.exists())
 
+    def test_app_cancellation_prusa_error_reaches_cancelled_cleanup(self):
+        old_work, old_exports, old_export = app_module.WORK, app_module.EXPORTS, app_module.export_archive
+        app_module.WORK = Path(self.tmp.name) / "job-work"
+        app_module.EXPORTS = Path(self.tmp.name) / "job-exports"
+        app_module.WORK.mkdir()
+        app_module.EXPORTS.mkdir()
+        token = "cancel-job"
+        (app_module.WORK / f"{token}.3mf").write_bytes(self.source.read_bytes())
+        job_id = "job-1"
+        with app_module._jobs_lock:
+            app_module._jobs[job_id] = {"status": "cancelling", "cancel": True}
+
+        def raise_cancel(*args, **kwargs):
+            raise PrusaNativeError("Konverzija prekinuta")
+
+        app_module.export_archive = raise_cancel
+        try:
+            with self.assertRaises(app_module.HTTPException):
+                app_module._perform_export(token, "cancelled.3mf", "{\"1\":2}", False, job_id)
+            self.assertEqual(app_module._jobs[job_id]["status"], "cancelled")
+            self.assertEqual(app_module._jobs[job_id]["phase"], "Konverzija prekinuta")
+            self.assertEqual(list(app_module.EXPORTS.rglob("*.3mf")), [])
+        finally:
+            app_module.export_archive = old_export
+            app_module.WORK, app_module.EXPORTS = old_work, old_exports
+            with app_module._jobs_lock:
+                app_module._jobs.pop(job_id, None)
+
     def test_all_filament_colour_slots_stay_available_to_ui(self):
         info = inspect_archive(self.source)
         self.assertIsInstance(info["display_tools"], list)

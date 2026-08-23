@@ -127,12 +127,12 @@ def _perform_export(token: str, filename: str, mapping: str, confirm_conflict: b
                 if _jobs[job_id]["cancel"]:
                     raise ThreeMFError("Konverzija prekinuta")
                 _jobs[job_id].update(phase="Validacija i spremanje", progress=100, status="completed", report=report, path=str(destination))
-    except (ThreeMFError, ValueError, json.JSONDecodeError) as exc:
+    except (ThreeMFError, PrusaNativeError, ValueError, json.JSONDecodeError) as exc:
         destination.unlink(missing_ok=True)
         export_directory.rmdir() if export_directory.exists() and not any(export_directory.iterdir()) else None
         if job_id:
             with _jobs_lock:
-                cancelled = _jobs[job_id]["cancel"] or str(exc) == "Konverzija prekinuta"
+                cancelled = str(exc) == "Konverzija prekinuta"
                 _jobs[job_id].update(status="cancelled" if cancelled else "error", phase="Konverzija prekinuta" if cancelled else "Greška", error=str(exc))
         raise fail(exc)
     mapping_header = ",".join(f"{source}-{target}" for source, target in sorted(parsed.items()))
@@ -156,7 +156,8 @@ def _run_job(job_id: str, token: str, filename: str, mapping: str, confirm_confl
         _perform_export(token, filename, mapping, confirm_conflict, job_id)
     except HTTPException:
         with _jobs_lock:
-            _jobs[job_id].update(status="error", phase="Greška", error="Učitana datoteka više nije dostupna.")
+            if _jobs[job_id].get("status") != "cancelled":
+                _jobs[job_id].update(status="error", phase="Greška", error="Učitana datoteka više nije dostupna.")
 
 
 @app.post("/api/export/jobs")
