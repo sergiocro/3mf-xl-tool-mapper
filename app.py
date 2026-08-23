@@ -4,6 +4,7 @@ import json
 import logging
 import tempfile
 import threading
+import time
 import uuid
 import webbrowser
 from pathlib import Path
@@ -23,6 +24,8 @@ EXPORTS.mkdir(exist_ok=True)
 app = FastAPI(title="3MF XL Tool Mapper", docs_url=None, redoc_url=None)
 logger = logging.getLogger("3mf-tool-mapper")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
 
 
 def fail(exc: Exception) -> HTTPException:
@@ -78,8 +81,7 @@ def thumbnail(token: str):
         raise fail(exc)
 
 
-@app.post("/api/export")
-def export(token: str = Form(...), filename: str = Form(...), mapping: str = Form(...), confirm_conflict: bool = Form(False)):
+def _perform_export(token: str, filename: str, mapping: str, confirm_conflict: bool, job_id: str | None = None):
     source = WORK / f"{token}.3mf"
     if not source.exists():
         raise HTTPException(404, "Učitana datoteka više nije dostupna.")
@@ -91,10 +93,20 @@ def export(token: str = Form(...), filename: str = Form(...), mapping: str = For
     export_directory.mkdir(parents=True, exist_ok=False)
     destination = export_directory / safe_name
     try:
+        if job_id:
+            with _jobs_lock:
+                if _jobs[job_id]["cancel"]:
+                    raise ThreeMFError("Konverzija prekinuta")
+                _jobs[job_id].update(status="running", phase="Priprema modela", progress=10)
         raw = json.loads(mapping)
         logger.info("Export mapping received by FastAPI: %s", mapping)
         parsed = {int(k): int(v) for k, v in raw.items()}
         logger.info("Export mapping used by backend: %s", json.dumps(parsed, sort_keys=True))
+        if job_id:
+            with _jobs_lock:
+                if _jobs[job_id]["cancel"]:
+                    raise ThreeMFError("Konverzija prekinuta")
+                _jobs[job_id].update(phase="Konverzija painting podataka", progress=30)
         report = export_archive(source, destination, parsed, confirm_conflict)
         report["mapping_request"] = raw
         report["mapping_normalized"] = dict(sorted(parsed.items()))
@@ -105,7 +117,18 @@ def export(token: str = Form(...), filename: str = Form(...), mapping: str = For
         report["export_id"] = export_id
         report["export_path"] = str(destination)
         report["export_sha256"] = backend_sha256
+        if job_id:
+            with _jobs_lock:
+                if _jobs[job_id]["cancel"]:
+                    raise ThreeMFError("Konverzija prekinuta")
+                _jobs[job_id].update(phase="Validacija i spremanje", progress=100, status="completed", report=report, path=str(destination))
     except (ThreeMFError, ValueError, json.JSONDecodeError) as exc:
+        destination.unlink(missing_ok=True)
+        export_directory.rmdir() if export_directory.exists() and not any(export_directory.iterdir()) else None
+        if job_id:
+            with _jobs_lock:
+                cancelled = _jobs[job_id]["cancel"] or str(exc) == "Konverzija prekinuta"
+                _jobs[job_id].update(status="cancelled" if cancelled else "error", phase="Konverzija prekinuta" if cancelled else "Greška", error=str(exc))
         raise fail(exc)
     mapping_header = ",".join(f"{source}-{target}" for source, target in sorted(parsed.items()))
     headers = {
@@ -116,6 +139,66 @@ def export(token: str = Form(...), filename: str = Form(...), mapping: str = For
         "Cache-Control": "no-store",
     }
     return FileResponse(destination, media_type="model/3mf", filename=safe_name, headers=headers)
+
+
+@app.post("/api/export")
+def export(token: str = Form(...), filename: str = Form(...), mapping: str = Form(...), confirm_conflict: bool = Form(False)):
+    return _perform_export(token, filename, mapping, confirm_conflict)
+
+
+def _run_job(job_id: str, token: str, filename: str, mapping: str, confirm_conflict: bool):
+    try:
+        _perform_export(token, filename, mapping, confirm_conflict, job_id)
+    except HTTPException:
+        with _jobs_lock:
+            _jobs[job_id].update(status="error", phase="Greška", error="Učitana datoteka više nije dostupna.")
+
+
+@app.post("/api/export/jobs")
+def start_export_job(token: str = Form(...), filename: str = Form(...), mapping: str = Form(...), confirm_conflict: bool = Form(False)):
+    job_id = str(uuid.uuid4())
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "queued", "phase": "Priprema modela", "progress": 0, "started": time.monotonic(), "cancel": False}
+    threading.Thread(target=_run_job, args=(job_id, token, filename, mapping, confirm_conflict), daemon=True).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/export/jobs/{job_id}")
+def export_job_status(job_id: str):
+    with _jobs_lock:
+        job = dict(_jobs.get(job_id, {}))
+    if not job:
+        raise HTTPException(404, "Nepoznat export posao.")
+    elapsed = max(0, time.monotonic() - job.get("started", time.monotonic()))
+    progress = job.get("progress", 0)
+    job["elapsed"] = elapsed
+    job["eta"] = (elapsed * (100 - progress) / progress) if progress >= 10 and progress < 100 else None
+    return {k: v for k, v in job.items() if k not in {"started", "cancel"}}
+
+
+@app.post("/api/export/jobs/{job_id}/cancel")
+def cancel_export_job(job_id: str):
+    with _jobs_lock:
+        if job_id not in _jobs:
+            raise HTTPException(404, "Nepoznat export posao.")
+        _jobs[job_id]["cancel"] = True
+        if _jobs[job_id]["status"] in {"queued", "running"}:
+            _jobs[job_id]["status"] = "cancelled"
+    return {"status": "cancelled"}
+
+
+@app.get("/api/export/jobs/{job_id}/download")
+def download_export_job(job_id: str):
+    with _jobs_lock:
+        job = dict(_jobs.get(job_id, {}))
+    if job.get("status") != "completed":
+        raise HTTPException(409, "Export još nije završen.")
+    path = Path(job["path"])
+    report = job["report"]
+    return FileResponse(path, media_type="model/3mf", filename=path.name, headers={
+        "X-Export-ID": report["export_id"], "X-Export-SHA256": report["export_sha256"],
+        "X-Export-Mapping": ",".join(f"{k}-{v}" for k, v in sorted(report["mapping_used"].items())),
+        "X-Validation-Report": json.dumps(report, separators=(",", ":")), "Cache-Control": "no-store"})
 
 
 if __name__ == "__main__":

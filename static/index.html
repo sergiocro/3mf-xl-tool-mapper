@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>3MF XL Tool Mapper</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260822-2">
+  <link rel="stylesheet" href="/static/style.css?v=20260823-1">
 </head>
 <body>
   <header><div><span class="tag">PRUSA XL · LOCAL</span><h1>3MF TOOL MAPPER</h1></div><div id="status" class="status">Čeka datoteku</div></header>
@@ -19,14 +19,18 @@
       <div class="preview-block"><h2>3MF PREVIEW</h2><div class="embedded-preview thumbnail-frame preview-frame card"><img id="thumbnail" alt="Ugrađeni 3MF preview"><span id="no-thumbnail">Nema ugrađenog previewa</span></div></div>
       <aside>
         <div class="card"><h2>FILAMENT / TOOL</h2><div id="tools"></div></div>
-        <div class="card diagnostic"><h2>DIJAGNOSTIKA</h2><pre id="diagnostic"></pre></div>
+        <details class="card diagnostic"><summary>DIJAGNOSTIKA</summary><pre id="diagnostic"></pre></details>
         <div id="warning" class="warning hidden"><strong>Konflikt mapiranja</strong><span>Više originalnih alata mapirano je na isti XL Tool.</span><label><input id="confirm" type="checkbox"> Eksplicitno potvrđujem konflikt</label></div>
         <button id="save" class="save">SPREMI NOVI 3MF</button>
         <div id="message"></div>
       </aside>
     </section>
   </main>
+  <div id="conversion-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="conversion-title">
+    <div class="modal-card"><h2 id="conversion-title">KONVERZIJA 3MF-a</h2><strong id="conversion-file"></strong><p id="conversion-phase">Priprema modela</p><progress id="conversion-progress" max="100" value="0"></progress><div class="progress-line"><span id="conversion-percent">0 %</span><span id="conversion-eta">Izračun procjene...</span></div><small id="conversion-elapsed">Proteklo vrijeme: 0 s</small><button id="cancel-export" class="cancel">PREKINI</button><button id="close-export" class="hidden">ZATVORI</button></div>
+    <div id="cancel-confirm" class="confirm-card hidden" role="alertdialog" aria-modal="true" style="position:absolute;inset:0;display:grid;place-items:center;background:#050805cc;z-index:2"><div class="modal-card"><strong>Jeste li sigurni da želite prekinuti konverziju?</strong><div><button id="cancel-stay">ODUSTANI</button><button id="cancel-yes" class="cancel">PREKINI KONVERZIJU</button></div></div></div>
+  </div>
   <script type="importmap">{"imports":{"three":"/static/vendor/three.module.js","three/addons/":"/static/vendor/"}}</script>
-  <script type="module" src="/static/app.js?v=20260822-3"></script>
+  <script type="module" src="/static/app.js?v=20260823-1"></script>
 </body>
 </html>
