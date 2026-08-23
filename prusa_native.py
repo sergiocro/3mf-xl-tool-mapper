@@ -8,7 +8,7 @@ from collections import Counter, deque
 from dataclasses import dataclass, field
 from html import escape
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 from xml.etree import ElementTree as ET
 
 from paint_codec import PaintCodecError, decode_paint_color, encode_paint_color, paint_states, remap_paint_color
@@ -422,10 +422,12 @@ def _thumbnail_members(archive: zipfile.ZipFile) -> tuple[list[str], str | None]
     return images, selected
 
 
-def _prepare_objects(project: Project, mapping: dict[int, int]) -> list[OutputObject]:
+def _prepare_objects(project: Project, mapping: dict[int, int], check_cancel: Callable[[], None] | None = None) -> list[OutputObject]:
     output: list[OutputObject] = []
     seen: set[str] = set()
     for build in project.build_items:
+        if check_cancel:
+            check_cancel()
         if build.object_id in seen:
             continue
         seen.add(build.object_id)
@@ -445,7 +447,7 @@ def _prepare_objects(project: Project, mapping: dict[int, int]) -> list[OutputOb
     return output
 
 
-def _write_model(project: Project, output_stream, objects: list[OutputObject], mapping: dict[int, int]) -> dict:
+def _write_model(project: Project, output_stream, objects: list[OutputObject], mapping: dict[int, int], check_cancel: Callable[[], None] | None = None) -> dict:
     source_to_output = {obj.source_id: obj.output_id for obj in objects}
     output_stream.write((
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -467,6 +469,8 @@ def _write_model(project: Project, output_stream, objects: list[OutputObject], m
     expected_triangle_hash = hashlib.sha256()
 
     for output in objects:
+        if check_cancel:
+            check_cancel()
         output_stream.write(f'  <object id="{output.output_id}" type="model" name="{_xml_attr(output.name)}">\n   <mesh>\n    <vertices>\n'.encode())
         vertex_bases: list[int] = []
         object_vertex_count = 0
@@ -476,7 +480,9 @@ def _write_model(project: Project, output_stream, objects: list[OutputObject], m
             if not identity:
                 transformed_leaves += 1
             leaf_vertices = 0
-            for vertex in _iter_member_elements(project.archive, leaf.path, leaf.object_id, "vertex"):
+            for vertex_index, vertex in enumerate(_iter_member_elements(project.archive, leaf.path, leaf.object_id, "vertex")):
+                if check_cancel and vertex_index % 4096 == 0:
+                    check_cancel()
                 try:
                     source_xyz = tuple(float(vertex.get(axis, "0")) for axis in ("x", "y", "z"))
                 except ValueError as exc:
@@ -496,7 +502,9 @@ def _write_model(project: Project, output_stream, objects: list[OutputObject], m
         for leaf_index, leaf in enumerate(output.leaves):
             first_triangle = object_triangle_count
             flip = leaf.transform.determinant() < 0
-            for triangle in _iter_member_elements(project.archive, leaf.path, leaf.object_id, "triangle"):
+            for triangle_index, triangle in enumerate(_iter_member_elements(project.archive, leaf.path, leaf.object_id, "triangle")):
+                if check_cancel and triangle_index % 2048 == 0:
+                    check_cancel()
                 try:
                     local_indices = tuple(int(triangle.get(key, "")) for key in ("v1", "v2", "v3"))
                 except ValueError as exc:
@@ -655,18 +663,18 @@ def _validate_output(path: Path, objects: list[OutputObject], build_items: list[
     }
 
 
-def export_prusa_native(source: Path, destination: Path, mapping: dict[int, int], original_hash: str) -> dict:
+def export_prusa_native(source: Path, destination: Path, mapping: dict[int, int], original_hash: str, check_cancel: Callable[[], None] | None = None) -> dict:
     try:
         with zipfile.ZipFile(source) as source_archive:
             project = _read_project(source_archive)
-            objects = _prepare_objects(project, mapping)
+            objects = _prepare_objects(project, mapping, check_cancel)
             instance_counts = Counter(item.object_id for item in project.build_items)
             images, selected_thumbnail = _thumbnail_members(source_archive)
             with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as output:
                 output.writestr("[Content_Types].xml", CONTENT_TYPES_XML)
                 output.writestr("_rels/.rels", RELS_XML)
                 with output.open(ROOT_MODEL, "w", force_zip64=True) as model_stream:
-                    write_stats = _write_model(project, model_stream, objects, mapping)
+                    write_stats = _write_model(project, model_stream, objects, mapping, check_cancel)
                 output.writestr(MODEL_CONFIG, _model_config(objects, instance_counts))
                 for name in images:
                     output.writestr(name, source_archive.read(name))

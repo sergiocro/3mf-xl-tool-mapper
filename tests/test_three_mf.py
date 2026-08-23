@@ -19,7 +19,7 @@ from xml.etree import ElementTree as ET
 import app as app_module
 import uvicorn
 from paint_codec import decode_paint_color, encode_paint_color, paint_states, remap_paint_color
-from prusa_native import CORE, MODEL_CONFIG, ROOT_MODEL, SLIC3RPE
+from prusa_native import CORE, MODEL_CONFIG, ROOT_MODEL, SLIC3RPE, PrusaNativeError
 from three_mf import MODEL_SETTINGS, PROJECT_SETTINGS, ThreeMFError, export_archive, inspect_archive, sha256_path
 
 
@@ -224,6 +224,21 @@ class ExportTests(unittest.TestCase):
         with zipfile.ZipFile(self.source) as before, zipfile.ZipFile(out) as after:
             self.assertEqual(before.read("Metadata/thumbnail.png"), after.read("Metadata/thumbnail.png"))
             self.assertNotIn(PROJECT_SETTINGS, after.namelist())
+
+    def test_cancellation_during_native_write_removes_partial_output(self):
+        out = Path(self.tmp.name) / "cancelled.3mf"
+        checks = 0
+
+        def cancel():
+            nonlocal checks
+            checks += 1
+            if checks >= 2:
+                raise PrusaNativeError("Konverzija prekinuta")
+
+        with self.assertRaises(ThreeMFError):
+            export_archive(self.source, out, {1: 2, 2: 1, 3: 4, 4: 5}, check_cancel=cancel)
+        self.assertGreaterEqual(checks, 2)
+        self.assertFalse(out.exists())
 
     def test_all_filament_colour_slots_stay_available_to_ui(self):
         info = inspect_archive(self.source)

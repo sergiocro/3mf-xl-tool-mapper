@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import zipfile
+from typing import Callable
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -338,7 +339,7 @@ def _replace_paint_colors(data: bytes, mapping: dict[int, int]) -> tuple[bytes, 
     return output, before, after, changed
 
 
-def export_archive(source: Path, destination: Path, mapping: dict[int, int], confirm_conflict: bool = False) -> dict:
+def export_archive(source: Path, destination: Path, mapping: dict[int, int], confirm_conflict: bool = False, check_cancel: Callable[[], None] | None = None) -> dict:
     source = source.resolve()
     destination = destination.resolve()
     if source == destination:
@@ -357,7 +358,7 @@ def export_archive(source: Path, destination: Path, mapping: dict[int, int], con
         )
     if painted_bambu:
         try:
-            result = export_prusa_native(source, destination, mapping, original_hash)
+            result = export_prusa_native(source, destination, mapping, original_hash, check_cancel)
             result["generated_sha256"] = sha256_path(destination)
             result["paint_roundtrip_ok"] = True
             result["project_filament_fields_changed"] = []

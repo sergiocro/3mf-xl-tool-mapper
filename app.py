@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from three_mf import ThreeMFError, export_archive, inspect_archive, preview_mesh, sha256_path
+from prusa_native import PrusaNativeError
 
 ROOT = Path(__file__).resolve().parent
 WORK = ROOT / ".work"
@@ -107,7 +108,11 @@ def _perform_export(token: str, filename: str, mapping: str, confirm_conflict: b
                 if _jobs[job_id]["cancel"]:
                     raise ThreeMFError("Konverzija prekinuta")
                 _jobs[job_id].update(phase="Konverzija painting podataka", progress=30)
-        report = export_archive(source, destination, parsed, confirm_conflict)
+        def check_cancel():
+            with _jobs_lock:
+                if _jobs[job_id]["cancel"]:
+                    raise PrusaNativeError("Konverzija prekinuta")
+        report = export_archive(source, destination, parsed, confirm_conflict, check_cancel if job_id else None)
         report["mapping_request"] = raw
         report["mapping_normalized"] = dict(sorted(parsed.items()))
         report["mapping_used"] = dict(sorted(parsed.items()))
