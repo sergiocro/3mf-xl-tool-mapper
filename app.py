@@ -181,10 +181,12 @@ def cancel_export_job(job_id: str):
     with _jobs_lock:
         if job_id not in _jobs:
             raise HTTPException(404, "Nepoznat export posao.")
-        _jobs[job_id]["cancel"] = True
-        if _jobs[job_id]["status"] in {"queued", "running"}:
-            _jobs[job_id]["status"] = "cancelled"
-    return {"status": "cancelled"}
+        current = _jobs[job_id]["status"]
+        if current in {"queued", "running"}:
+            _jobs[job_id]["cancel"] = True
+            _jobs[job_id]["status"] = "cancelling"
+            _jobs[job_id]["phase"] = "Prekid konverzije..."
+        return {"status": _jobs[job_id]["status"]}
 
 
 @app.get("/api/export/jobs/{job_id}/download")
